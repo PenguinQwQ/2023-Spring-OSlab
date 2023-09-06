@@ -11,19 +11,49 @@ static proc_t *curr = &pcb[0];
 
 void init_proc() {
   // Lab2-1, set status and pgdir
+  pcb[0].status = RUNNING;
+  pcb[0].pgdir = vm_curr();
+  pcb[0].kstack = (void *)(KER_MEM - PGSIZE);
+
   // Lab2-4, init zombie_sem
+  sem_init(&(pcb[0].zombie_sem), 0);
   // Lab3-2, set cwd
+  pcb[0].cwd = iopen("/", TYPE_NONE);
 }
 
 proc_t *proc_alloc() {
   // Lab2-1: find a unused pcb from pcb[1..PROC_NUM-1], return NULL if no such one
-  TODO();
+  //TODO();
+  for (int i = 1 ; i <= PROC_NUM - 1 ; i++)
+  {
+    if(pcb[i].status == UNUSED)
+    {
+      pcb[i].pid = next_pid;
+      next_pid++;
+      pcb[i].status = UNINIT;
+      pcb[i].pgdir = vm_alloc();
+      pcb[i].brk = 0;
+      pcb[i].kstack = kalloc();
+      pcb[i].ctx = &(pcb[i].kstack->ctx);
+      pcb[i].parent = NULL;
+      pcb[i].child_num = 0;
+      sem_init(&(pcb[i].zombie_sem), 0);
+      for (int j = 0 ; j <= MAX_USEM - 1 ; j++) //Init the user sem table
+        pcb[i].usems[j] = NULL;
+      for (int j = 0 ; j <= MAX_UFILE - 1 ; j++)
+        pcb[i].files[j] = NULL;
+      pcb[i].cwd = NULL;
+      return (proc_t *)(&pcb[i]);
+    }
+  }
+  return NULL;
   // init ALL attributes of the pcb
 }
 
 void proc_free(proc_t *proc) {
   // Lab2-1: free proc's pgdir and kstack and mark it UNUSED
-  TODO();
+  //TODO();
+  proc->status = UNUSED;
 }
 
 proc_t *proc_curr() {
@@ -51,23 +81,70 @@ void proc_yield() {
 
 void proc_copycurr(proc_t *proc) {
   // Lab2-2: copy curr proc
+  assert(proc->status == UNINIT);
+  vm_copycurr(proc->pgdir);
+  proc->brk = proc_curr()->brk;
+  proc->kstack->ctx = proc_curr()->kstack->ctx;
+  proc->ctx->eax = 0;
+  proc->parent = proc_curr();
+  proc_curr()->child_num++;
   // Lab2-5: dup opened usems
+  for (int i = 0 ; i <= MAX_USEM - 1 ; i++)
+  {
+    usem_t *ptr = proc_curr()->usems[i];
+    if(ptr == NULL) continue;
+    proc->usems[i] = ptr;
+    usem_dup(ptr);
+  }
   // Lab3-1: dup opened files
+  for (int i = 0 ; i <= MAX_UFILE - 1 ; i++)
+  {
+    file_t *file = proc_curr()->files[i];
+    proc->files[i] = file;
+    if(file != NULL) fdup(file);
+  }
   // Lab3-2: dup cwd
-  TODO();
+  proc->cwd = idup(proc_curr()->cwd);
+  // TODO();
 }
 
 void proc_makezombie(proc_t *proc, int exitcode) {
   // Lab2-3: mark proc ZOMBIE and record exitcode, set children's parent to NULL
+  proc->status = ZOMBIE;
+  proc->exit_code = exitcode;
+  for (int i = 0 ; i <= 63 ; i++)
+    {
+      if(pcb[i].parent == proc)
+        pcb[i].parent = NULL;
+    }
   // Lab2-5: close opened usem
+  for (int i = 0 ; i <= MAX_USEM - 1 ; i++)
+  {
+    if(proc->usems[i] != NULL)
+      usem_close(proc->usems[i]);
+  }
   // Lab3-1: close opened files
+  for (int i = 0 ; i <= MAX_UFILE - 1 ; i++)
+  {
+    if(proc->files[i] != NULL)
+      fclose(proc->files[i]);
+  }
   // Lab3-2: close cwd
-  TODO();
+  // TODO();
+  if(proc->parent != NULL)
+      sem_v(&(proc->parent->zombie_sem));
+  iclose(proc->cwd);
 }
 
 proc_t *proc_findzombie(proc_t *proc) {
   // Lab2-3: find a ZOMBIE whose parent is proc, return NULL if none
-  TODO();
+  // TODO();
+  for (int i = 0 ; i <= 63 ; i++)
+    {
+      if(pcb[i].parent == proc && pcb[i].status == ZOMBIE)
+        return (proc_t *)(&pcb[i]);
+    }
+  return NULL;
 }
 
 void proc_block() {
@@ -78,25 +155,66 @@ void proc_block() {
 
 int proc_allocusem(proc_t *proc) {
   // Lab2-5: find a free slot in proc->usems, return its index, or -1 if none
-  TODO();
+  // TODO();
+  for (int i = 0 ; i <= MAX_USEM - 1 ; i++)
+    {
+      if(proc->usems[i] == NULL)
+        return i;
+    }
+  return -1;
 }
 
 usem_t *proc_getusem(proc_t *proc, int sem_id) {
   // Lab2-5: return proc->usems[sem_id], or NULL if sem_id out of bound
-  TODO();
+  // TODO();
+  if(sem_id >= 32 || sem_id < 0) return NULL;
+  return proc->usems[sem_id];
 }
 
 int proc_allocfile(proc_t *proc) {
   // Lab3-1: find a free slot in proc->files, return its index, or -1 if none
-  TODO();
+  for (int i = 0 ; i <= MAX_UFILE - 1 ; i++)
+    {
+      if(proc->files[i] == NULL || (proc->files[i]->ref == 0))
+        return i;
+    }
+  return -1;
 }
 
 file_t *proc_getfile(proc_t *proc, int fd) {
   // Lab3-1: return proc->files[fd], or NULL if fd out of bound
-  TODO();
+  //TODO();
+  if(fd < 0 || fd >= 32) return NULL;
+  return proc->files[fd];
 }
 
 void schedule(Context *ctx) {
   // Lab2-1: save ctx to curr->ctx, then find a READY proc and run it
-  TODO();
+  //TODO();
+  proc_curr()->ctx = ctx;
+  proc_t *pcb_begin = &pcb[0];//Find the first pcb pointer
+  proc_t *pcb_end = &pcb[PROC_NUM - 1];//Find the last pcb!
+  proc_t *now = proc_curr();
+  proc_t *pcb_now = proc_curr();
+  pcb_now++;
+  while(pcb_now <= pcb_end)
+  {
+    if(pcb_now->status == READY)
+      {
+        proc_run(pcb_now);
+        return;
+      }
+    pcb_now++;
+  }
+  pcb_now = pcb_begin;
+  while(pcb_now <= now)
+    {
+      if(pcb_now->status == READY)
+      {
+        proc_run(pcb_now);
+        return;
+      }
+      pcb_now++;
+    }
+  assert(0);//No valid ready pcb!!!
 }

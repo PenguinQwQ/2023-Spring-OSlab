@@ -1,7 +1,7 @@
 #include "ulib.h"
 
 char buf[4096];
-
+ 
 void
 cat(int fd)
 {

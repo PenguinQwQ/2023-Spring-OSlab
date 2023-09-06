@@ -5,7 +5,7 @@
 static list_t list_buf[LIST_NUM];
 static list_t free_list;
 static int inited = 0;
-
+//Insert the list node from the head!
 static void list_add_next(list_t *list, list_t *ptr) {
   ptr->prev = list;
   ptr->next = list->next;
@@ -13,6 +13,7 @@ static void list_add_next(list_t *list, list_t *ptr) {
   ptr->next->prev = ptr;
 }
 
+//Delete the last node from the list, release the node and return the node pointer!
 static list_t *list_remove_prev(list_t *list) {
   assert(!list_empty(list));
   list_t *ptr = list->prev;
@@ -41,9 +42,9 @@ int list_empty(list_t *list) {
 }
 
 list_t *list_enqueue(list_t *list, void *ptr) {
-  list_t *l = list_remove_prev(&free_list);
+  list_t *l = list_remove_prev(&free_list);//Get a free node
   l->ptr = ptr;
-  list_add_next(list, l);
+  list_add_next(list, l);//Insert head!
   return l;
 }
 

@@ -158,15 +158,19 @@ static void diwrite(const dinode_t *di, uint32_t no) {
   bwrite(di, sizeof(dinode_t), I2BLKNO(no), I2BLKOFF(no));
 }
 
-static uint32_t dialloc(int type) {
-  // Lab3-2: iterate all dinode, find a empty one (type==TYPE_NONE)
-  // set type, clean other infos and return its no (remember to write back)
-  // if no empty one, just abort
-  // note that first (0th) inode always unused, because dirent's inode 0 mark invalid
+static uint32_t dialloc(int type) {//Done!
   dinode_t dinode;
-  for (uint32_t i = 1; i < sb.inum; ++i) {
-    diread(&dinode, i);
-    TODO();
+  uint32_t x = 1;
+  while(x < sb.inum)
+  {
+    diread(&dinode, x);
+    if(dinode.type == TYPE_NONE)
+    {
+      dinode.type = type;
+      diwrite(&dinode, x);
+      return x;
+    }
+    x++;
   }
   assert(0);
 }
@@ -177,56 +181,78 @@ static void difree(uint32_t no) {
   diwrite(&dinode, no);
 }
 
+
 static uint32_t balloc() {
-  // Lab3-2: iterate bitmap, find one free block
-  // set the bit, clean the blk (can call bzero) and return its no
-  // if no free block, just abort
   uint32_t byte;
   for (int i = 0; i < BLK_NUM / 32; ++i) {
     bread(&byte, 4, sb.bitmap, i * 4);
     if (byte != 0xffffffff) {
-      TODO();
+    uint32_t x = 0;
+    while(x <= 31)
+    {
+      uint32_t flag = (1 << x) & byte;
+      uint32_t pos = 32 * i + x;
+      if(flag == 0)
+      {
+        byte = byte | (1 << x);
+        bzero(pos);
+        bwrite(&byte, 4, sb.bitmap, i * 4);
+        return pos;
+      } 
+      x++;
+    }
     }
   }
   assert(0);
 }
 
 static void bfree(uint32_t blkno) {
-  // Lab3-2: clean the bit of blkno in bitmap
   assert(blkno >= 64); // cannot free first 64 block
-  TODO();
+  uint32_t data = 0;
+  bread(&data, sizeof(uint32_t), sb.bitmap, blkno >> 5);
+  uint32_t m = (1 << (blkno % 32));
+  uint32_t mask = ~m;
+  data &= mask;
+  bwrite(&data, sizeof(uint32_t), sb.bitmap, blkno >> 5);
 }
 
 #define INODE_NUM 128
+//The Kernel Inode Table!
 static inode_t inodes[INODE_NUM];
 
 static inode_t *iget(uint32_t no) {
-  // Lab3-2
-  // if there exist one inode whose no is just no, inc its ref and return it
-  // otherwise, find a empty inode slot, init it and return it
-  // if no empty inode slot, just abort
-  TODO();
+  uint32_t x = 1;
+  while (x < INODE_NUM)
+  {
+    inode_t *node_ptr = &inodes[x];
+    if(node_ptr->no == no)
+    {
+      node_ptr->ref++;
+      return node_ptr;
+    }
+    x++;
+  }
+  uint32_t y = 1;
+  while (y < INODE_NUM)
+  {
+    inode_t *node_ptr = &inodes[y];
+    if(node_ptr->ref == 0)
+    {
+      node_ptr->ref++;
+      node_ptr->no = no;
+      node_ptr->del = 0;
+      diread(&(inodes[y].dinode), no);
+      return node_ptr;
+    }
+    y++;
+  }
+  assert(0);
 }
 
 static void iupdate(inode_t *inode) {
-  // Lab3-2: sync the inode->dinode to disk
-  // call me EVERYTIME after you edit inode->dinode
   diwrite(&inode->dinode, inode->no);
 }
 
-
-// Copy the next path element from path into name.
-// Return a pointer to the element following the copied one.
-// The returned path has no leading slashes,
-// so the caller can check *path=='\0' to see if the name is the last one.
-// If no name to remove, return NULL.
-//
-// Examples:
-//   skipelem("a/bb/c", name) = "bb/c", setting name = "a"
-//   skipelem("///a//bb", name) = "bb", setting name = "a"
-//   skipelem("a", name) = "", setting name = "a"
-//   skipelem("", name) = skipelem("////", name) = NULL
-//
 static const char* skipelem(const char *path, char *name) {
   const char *s;
   int len;
@@ -262,37 +288,43 @@ static void idirinit(inode_t *inode, inode_t *parent) {
   iwrite(inode, sizeof dirent, &dirent, sizeof dirent);
 }
 
+
 static inode_t *ilookup(inode_t *parent, const char *name, uint32_t *off, int type) {
-  // Lab3-2: iterate the parent dir, find a file whose name is name
-  // if off is not NULL, store the offset of the dirent_t to it
-  // if no such file and type == TYPE_NONE, return NULL
-  // if no such file and type != TYPE_NONE, create the file with the type
   assert(parent->dinode.type == TYPE_DIR); // parent must be a dir
   dirent_t dirent;
   uint32_t size = parent->dinode.size, empty = size;
-  for (uint32_t i = 0; i < size; i += sizeof dirent) {
-    // directory is a file containing a sequence of dirent structures
-    iread(parent, i, &dirent, sizeof dirent);
-    if (dirent.inode == 0) {
-      // a invalid dirent, record the offset (used in create file), then skip
-      if (empty == size) empty = i;
+  inode_t *f = NULL;
+  uint32_t i = 0;
+  while(i < size)
+  {
+    iread(parent, i, &dirent, sizeof(dirent_t));
+    if(dirent.inode == 0)
+    {
+      if(empty == size) empty = i;
+      i = i + sizeof(dirent_t);
       continue;
     }
-    // a valid dirent, compare the name
-    TODO();
+    if(strcmp(dirent.name, name) == 0)
+    {
+      f = iget(dirent.inode);
+      if(off != NULL) *off = i;
+      return f;
+    }
+    i = i + sizeof(dirent_t);
   }
-  // not found
   if (type == TYPE_NONE) return NULL;
-  // need to create the file, first alloc inode, then init dirent, write it to parent
-  // if you create a dir, remember to init it's . and ..
-  TODO();
+  uint32_t num = dialloc(type);
+  f = iget(num);
+  dirent.inode = num;
+  strcpy(dirent.name, name);
+  if(type == TYPE_DIR) idirinit(f, parent);
+  iwrite(parent, empty, &dirent, sizeof(dirent));
+  if(off != NULL) *off = empty;
+  return f;
 }
 
 static inode_t *iopen_parent(const char *path, char *name) {
-  // Lab3-2: open the parent dir of path, store the basename to name
-  // if no such parent, return NULL
   inode_t *ip, *next;
-  // set search starting inode
   if (path[0] == '/') {
     ip = iget(sb.root);
   } else {
@@ -300,20 +332,15 @@ static inode_t *iopen_parent(const char *path, char *name) {
   }
   assert(ip);
   while ((path = skipelem(path, name))) {
-    // curr round: need to search name in ip
     if (ip->dinode.type != TYPE_DIR) {
-      // not dir, cannot search
       iclose(ip);
       return NULL;
     }
     if (*path == 0) {
-      // last search, return ip because we just need parent
       return ip;
     }
-    // not last search, need to continue to find parent
     next = ilookup(ip, name, NULL, 0);
     if (next == NULL) {
-      // name not exist
       iclose(ip);
       return NULL;
     }
@@ -325,57 +352,118 @@ static inode_t *iopen_parent(const char *path, char *name) {
 }
 
 inode_t *iopen(const char *path, int type) {
-  // Lab3-2: if file exist, open and return it
-  // if file not exist and type==TYPE_NONE, return NULL
-  // if file not exist and type!=TYPE_NONE, create the file as type
   char name[MAX_NAME + 1];
+  memset(name, 0, sizeof(name));
   if (skipelem(path, name) == NULL) {
-    // no parent dir for path, path is "" or "/"
-    // "" is an invalid path, "/" is root dir
     return path[0] == '/' ? iget(sb.root) : NULL;
   }
-  // path do have parent, use iopen_parent and ilookup to open it
-  // remember to close the parent inode after you ilookup it
-  TODO();
+  inode_t *ptr = iopen_parent(path, name);
+  if(ptr == NULL) return NULL;  
+  inode_t *f = ilookup(ptr, name, NULL, type);
+  iclose(ptr);
+  return f;
 }
 
 static uint32_t iwalk(inode_t *inode, uint32_t no) {
-  // return the blkno of the file's data's no th block, if no, alloc it
+  uint32_t blkno = 0, cur;
   if (no < NDIRECT) {
-    // direct address
-    TODO();
+    cur = inode->dinode.addrs[no];
+    if(cur == 0)
+    {
+      cur = balloc();
+      inode->dinode.addrs[no] = cur;
+      iupdate(inode);
+    }
+    return inode->dinode.addrs[no];
   }
   no -= NDIRECT;
   if (no < NINDIRECT) {
-    // indirect address
-    TODO();
+    if(inode->dinode.addrs[NDIRECT] == 0)
+    {
+      inode->dinode.addrs[NDIRECT] = balloc();
+      iupdate(inode);
+    }
+    uint32_t ind_blk = inode->dinode.addrs[NDIRECT];
+    bread(&blkno, 4, ind_blk, no << 2);
+    if(blkno == 0)
+    {
+      blkno = balloc();
+      bwrite(&blkno, 4, ind_blk, no << 2);
+    }
+    return blkno;
   }
   assert(0); // file too big, not need to handle this case
 }
 
 int iread(inode_t *inode, uint32_t off, void *buf, uint32_t len) {
-  // Lab3-2: read the inode's data [off, MIN(off+len, size)) to buf
-  // use iwalk to get the blkno and read blk by blk
-  TODO();
+  uint32_t file_sz = inode->dinode.size;
+  if(off + len > file_sz) len = file_sz - off;
+  uint32_t ret = len, num, no, offset, rd = 0;
+  for(; len != 0;)
+  {
+    offset = off % BLK_SIZE;
+    num = off / BLK_SIZE;
+    no = iwalk(inode, num);
+    if(len < BLK_SIZE - offset) rd = len;
+    else rd = BLK_SIZE - offset;
+    bread(buf, rd, no, offset);
+    buf = buf + rd;
+    off = off + rd;
+    len = len - rd;
+  }
+  return ret;
 }
 
 int iwrite(inode_t *inode, uint32_t off, const void *buf, uint32_t len) {
-  // Lab3-2: write buf to the inode's data [off, off+len)
-  // if off>size, return -1 (can not cross size before write)
-  // if off+len>size, update it as new size (but can cross size after write)
-  // use iwalk to get the blkno and read blk by blk
-  TODO();
+  if(off > inode->dinode.size) return -1;
+  uint32_t num, no, offset, wr = 0, sz = len, end = off + len;
+  for(;len > 0;)
+  {
+    offset = off % BLK_SIZE;
+    num = off / BLK_SIZE;
+    no = iwalk(inode, num);
+    if(len < BLK_SIZE - offset) wr = len;
+    else wr = BLK_SIZE - offset;
+    bwrite(buf, wr, no, offset);
+    buf = buf + wr;
+    off = off + wr;
+    len = len - wr;
+  }
+  if(end > inode->dinode.size)
+  {
+    inode->dinode.size = end;
+    iupdate(inode);
+  }
+  return sz;
 }
-
 void itrunc(inode_t *inode) {
-  // Lab3-2: free all data block used by inode (direct and indirect)
-  // mark all address of inode 0 and mark its size 0
-  TODO();
+  inode->dinode.size = 0;
+  uint32_t blk_no = 0;
+  for (int i = 0 ; i < NDIRECT ; i++)
+    {
+      blk_no = inode->dinode.addrs[i];
+      if(blk_no == 0) continue;
+      else bfree(blk_no);
+    }
+  if(inode->dinode.addrs[NDIRECT] == 0)
+  {
+    iupdate(inode);
+    return;
+  }
+  uint32_t tmp = inode->dinode.addrs[NDIRECT];
+  for (int i = 0 ; i < NINDIRECT; i++)
+    {
+      bread(&blk_no, 4, tmp, i << 2);
+      if(blk_no == 0) continue;
+      else bfree(blk_no);
+    }
+  iupdate(inode);
+  return;
 }
 
 inode_t *idup(inode_t *inode) {
   assert(inode);
-  inode->ref += 1;
+  inode->ref ++;
   return inode;
 }
 
@@ -413,22 +501,55 @@ void iadddev(const char *name, int id) {
 }
 
 static int idirempty(inode_t *inode) {
-  // Lab3-2: return whether the dir of inode is empty
-  // the first two dirent of dir must be . and ..
-  // you just need to check whether other dirent are all invalid
   assert(inode->dinode.type == TYPE_DIR);
-  TODO();
+  uint32_t size = inode->dinode.size;
+  dirent_t dirent;
+  for (uint32_t i = 0; i < size; i += sizeof(dirent_t)) {
+    iread(inode, i, &dirent, sizeof dirent);
+    if(dirent.inode == 0) continue;
+    if(dirent.inode != 0 && (strcmp(dirent.name, ".") == 0 && i == 0)) continue;
+    if(dirent.inode != 0 && (strcmp(dirent.name, "..") == 0 && (i == sizeof(dirent_t)))) continue;
+    return false;
+  }
+  return true;
 }
 
 int iremove(const char *path) {
-  // Lab3-2: remove the file, return 0 on success, otherwise -1
-  // first open its parent, if no parent, return -1
-  // then find file in parent, if not exist, return -1
-  // if the file need to remove is a dir, only remove it when it's empty
-  // . and .. cannot be remove, so check name set by iopen_parent
-  // remove a file just need to clean the dirent points to it and set its inode's del
-  // the real remove will be done at iclose, after everyone close it
-  TODO();
+  char name[MAX_NAME + 1];
+  uint32_t offset;
+  dirent_t dirent;
+  inode_t *ptr = iopen_parent(path, name);
+  if(ptr == NULL) return -1;
+  if(strcmp(name, ".") == 0) 
+    {
+      iclose(ptr);
+      return -1;
+    }
+  if(strcmp(name, "..") == 0)
+    {
+      iclose(ptr);
+      return -1;
+    }
+  
+  inode_t *f = ilookup(ptr, name, &offset, TYPE_NONE);
+  if(f == NULL)
+  {
+    iclose(ptr);
+    return -1;
+  }
+  if(itype(f) == TYPE_DIR)
+  {
+    if(idirempty(f) == false) 
+      {
+        iclose(f);
+        iclose(ptr);
+        return -1;
+      }
+  }
+  memset(&dirent, 0, sizeof(dirent_t));
+  f->del = 1;
+  iwrite(ptr, offset, &dirent, sizeof(dirent_t));
+  return 0;
 }
 
 #endif

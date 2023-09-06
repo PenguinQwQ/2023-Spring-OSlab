@@ -87,6 +87,7 @@ sb_t *sb; // pointor to the super block
 blk_t *bitmap; // pointor to the bitmap block
 dinode_t *root; // pointor to the root dir's inode
 
+//Notice, the no should be the origin number!
 // get the pointer to the memory of block no
 static inline blk_t *bget(uint32_t no) {
   assert(no >= BLK_OFF);
@@ -162,26 +163,67 @@ uint32_t ialloc(int type) {
   return next_inode++;
 }
 
+//
 blk_t *iwalk(dinode_t *file, uint32_t blk_no) {
   // return the pointer to the file's data's blk_no th block, if no, alloc it
+  uint32_t no = 0;
   if (blk_no < NDIRECT) {
-    // direct address
-    TODO();
+    // direct address!
+    // TODO();
+    no = file->addrs[blk_no];//First direct get the blk number
+    //If no is zero, which means hasn't distribute a blk!
+    if(no == 0) //Means the block number doesn't exists
+      {
+        no = balloc();
+        file->addrs[blk_no] = no;
+      }
+    if(no < 64) panic("The block number is over 64!");
+    return bget(no);//Return the memory address of no blk
   }
   blk_no -= NDIRECT;
   if (blk_no < NINDIRECT) {
     // indirect address
-    TODO();
+    //The indirect block is in the file->addrs[NDIRECT] block!
+    //we should get the 1024 addr!
+    uint32_t ind_blk = file->addrs[NDIRECT];
+    if(ind_blk == 0)//Means there is no indirect block for
+      {
+        file->addrs[NDIRECT] = balloc();
+        ind_blk = file->addrs[NDIRECT];
+      }
+    if(ind_blk < 64) panic("The indirect block number is less than 64");
+    //Here we get the ind_blk is the place for indirect index
+    //Next we should find the blk_no in the place!
+    no = bget(ind_blk)->u32buf[blk_no];
+    //(img->blocks[ind_blk].u32buf[blk_no]);
+    if(no == 0)
+    {
+      no = balloc();
+      bget(ind_blk)->u32buf[blk_no] = no;
+    }
+    return bget(no);
   }
   panic("file too big");
 }
 
+//
 void iappend(dinode_t *file, const void *buf, uint32_t size) {
   // append buf to file's data, remember to add file->size
   // you can append block by block
-  TODO();
+  // TODO();
+  while(size > 0)
+  {
+    uint32_t blk_no = file->size / BLK_SIZE, offset = file->size % BLK_SIZE;
+    void *blk_addr = iwalk(file, blk_no);
+    uint32_t write_size = MIN(size, BLK_SIZE - offset);
+    memcpy((void *)(blk_addr + offset), buf, write_size);
+    file->size += write_size;
+    buf += write_size;
+    size -= write_size;
+  }
 }
 
+//
 void add_file(char *path) {
   static uint8_t buf[BLK_SIZE];
   FILE *fp = fopen(path, "rb");
@@ -195,6 +237,13 @@ void add_file(char *path) {
   strcpy(dirent.name, basename(path));
   iappend(root, &dirent, sizeof dirent);
   // write the file's data, first read it to buf then call iappend
-  TODO();
+  //TODO();
+  int size = -1;
+  while(!feof(fp))
+  {
+    memset(buf, 0, sizeof(buf));
+    size = fread(buf, sizeof(uint8_t), BLK_SIZE - 1, fp);
+    iappend(inode, buf, size);
+  }
   fclose(fp);
 }

@@ -114,11 +114,11 @@ typedef union PageDirectoryEntry {
     uint32_t page_frame : 20;
   };
   uint32_t val;
-} PDE;
+} PDE;//Each PDE has a page_frame, << BITS to get the Page Table Physical Address
 
 typedef struct PageDirectory {
   PDE pde[NR_PDE] PG_ALIGN;
-} PD;
+} PD;//PD is the Page Directory!
 
 /* the 32bit Page Table Entry(second level page table) data structure */
 typedef union PageTableEntry {
@@ -136,11 +136,11 @@ typedef union PageTableEntry {
     uint32_t page_frame : 20;
   };
   uint32_t val;
-} PTE;
-
+} PTE;//One Page Table Entry, sizeof(PTE)=4
+ 
 typedef struct PageTable {
   PTE pte[NR_PTE] PG_ALIGN;
-} PT;
+} PT;//Page Table Has NR_PTE PTE, sizeof(PT) is 4 * 1024 = 4096
 
 #define MAKE_PDE(addr, prot) (PAGE_DOWN(addr) | (prot) | (PTE_P))
 #define MAKE_PTE(addr, prot) (PAGE_DOWN(addr) | (prot) | (PTE_P))

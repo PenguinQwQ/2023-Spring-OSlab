@@ -14,6 +14,7 @@ void test(int i) {
   if (i > 0) sem_p(sems[i-1]);
   if (i < 3) {
     int l = strlen(ans[i]);
+  //  printf("Now at test(%d), l is %d\n", i, l);
     assert(read(fd, buf, l) == l);
     assert(strcmp(buf, ans[i]) == 0);
     sem_v(sems[i]);
@@ -39,6 +40,7 @@ int main() {
     assert(sems[i] >= 0);
   }
   fd = open("words.txt", O_RDONLY);
+ // printf("fd is %d\n", fd);
   assert(fd >= 0);
   printf("readtest start\n");
   for (int i = 0; i < 4; ++i) {
